@@ -177,15 +177,27 @@ with st.sidebar:
     st.markdown("""
     <div class="logo-block">
       <div class="logo-title">💼 Compta Sarah</div>
-      <div class="logo-sub">Gestion Automatisée · GAPAYLO</div>
+      <div class="logo-sub">La belle vie, occupe toi de ton mari</div>
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown("#### 🤖 Robot AC + GL")
+    st.markdown("#### 🏦 Rapprochement Bancaire + Attribution de Compte")
     st.markdown("<small style='color:#5b7fa6'>Attribution des comptes & intégration loyers</small>", unsafe_allow_html=True)
     st.markdown("---")
 
-    st.markdown("<span style='font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:#5b7fa6'>📂 Fichiers</span>", unsafe_allow_html=True)
+    st.markdown("<span style='font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:#5b7fa6'>🏢 Société</span>", unsafe_allow_html=True)
+    SOCIETES = [
+        "SCI EMJJ",
+        "SCI EMJJ MIRABEAU",
+        "SCI MMA",
+        "SCI AZM",
+        "SCI MAZ",
+        "SOGEPA",
+        "M.A LA GARENNE",
+    ]
+    societe_sel = st.selectbox("Société", SOCIETES, key="societe")
+
+    st.markdown("<br><span style='font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:#5b7fa6'>📂 Fichiers</span>", unsafe_allow_html=True)
     releve_file = st.file_uploader("Relevé bancaire", type=["xlsx"], key="releve")
     pivot_file  = st.file_uploader("Tableau Pivot",   type=["xlsx"], key="pivot")
     loyers_file = st.file_uploader("Tableau Loyers",  type=["xlsx"], key="loyers")
@@ -212,7 +224,7 @@ with st.sidebar:
 st.markdown("""
 <div style='margin-bottom:8px'>
   <h1 style='font-family:Playfair Display,serif;font-size:32px;color:#0D1B2A;margin:0'>
-    Robot AC + GL
+    Rapprochement Bancaire + Attribution de Compte
   </h1>
   <p style='color:#6b7280;margin:4px 0 0 0;font-size:15px'>
     Attribution des comptes comptables &amp; mise à jour du tableau des loyers
