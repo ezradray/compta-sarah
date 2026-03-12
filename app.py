@@ -46,10 +46,10 @@ with st.sidebar:
     st.markdown("<span style='font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#5b7fa6'>🤖 Robots</span>", unsafe_allow_html=True)
     c1,c2 = st.columns(2)
     with c1:
-        if st.button("🏦 AC+GL", use_container_width=True, type="primary" if st.session_state.robot=="AC_GL" else "secondary"):
+        if st.button("🏦 Rapprochement & Attribution", use_container_width=True, type="primary" if st.session_state.robot=="AC_GL" else "secondary"):
             st.session_state.robot="AC_GL"; st.rerun()
     with c2:
-        if st.button("📄 RA+RQ", use_container_width=True, type="primary" if st.session_state.robot=="RA_RQ" else "secondary"):
+        if st.button("📄 Avis & Quittances", use_container_width=True, type="primary" if st.session_state.robot=="RA_RQ" else "secondary"):
             st.session_state.robot="RA_RQ"; st.rerun()
 
     st.markdown("---")
