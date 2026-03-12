@@ -130,13 +130,21 @@ def run(releve_io, pivot_io, loyers_io, mois, annee=2026, seuil=0.52):
     # Export 1 : Intégration logiciel
     rows=[]
     for _,r in df_res[df_res.STATUT=='OK'].iterrows():
-        if r['COMPTE'] in('—','???','CAF'): continue
+        if r['COMPTE'] in('--','???','CAF'): continue
         d=r['DATE'].strftime('%Y-%m-%d') if pd.notna(r['DATE']) else ''
         m=abs(r['MONTANT']); lib=str(r['LIBELLE'])[:40]
-        piece='PRLVT' if re.search(r'PRLV|PRLVT',lib,re.I) else ('VIRT' if 'VIR' in lib.upper() else 'AUTRE')
-        d1=m if r['SENS']=='DEBIT' else 0; c1=m if r['SENS']=='CREDIT' else 0
-        rows.append([d,'BQ0','47100000',piece,lib,round(d1,2),round(c1,2)])
-        rows.append([d,'BQ0','51200000',piece,lib,round(c1,2),round(d1,2)])
+        compte=r['COMPTE']
+        if re.search(r'PRLV SEPA|PRLVT',lib,re.I): piece='PRLVT'
+        elif re.search(r'VIR',lib,re.I): piece='VIRT'
+        elif re.search(r'REMISE|REM CHQ',lib,re.I): piece='REMISE'
+        elif re.search(r'FACT SGT|FACTURE',lib,re.I): piece='AUTRE'
+        else: piece='AUTRE'
+        if r['SENS']=='CREDIT':
+            rows.append([d,'BQ0',compte,   piece,lib,0,          round(m,2)])
+            rows.append([d,'BQ0','51200000',piece,lib,round(m,2),0         ])
+        else:
+            rows.append([d,'BQ0',compte,   piece,lib,round(m,2),0         ])
+            rows.append([d,'BQ0','51200000',piece,lib,0,          round(m,2)])
     df_integ=pd.DataFrame(rows,columns=['DATE','CODE BANQUE','COMPTE','PIECE','LIBELLE','DEBIT','CREDIT'])
     buf1=BytesIO()
     with pd.ExcelWriter(buf1,engine='openpyxl') as w:
