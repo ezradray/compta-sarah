@@ -1,10 +1,11 @@
 """
 Robot GFS — Génération Facture Salle
-Lit le fichier RECAP_SOIREES_A_FACTURER et génère un ZIP de factures PDF
-par année sélectionnée, en ordre chronologique strict.
+Basé sur la structure 2025 (modèle définitif)
+Col A=date soirée, B=N°facture, C=ignoré, D=nom client,
+E=adresse, F=CP, G=ville, H..AN=règlements, AO=TTC, AP=HT, AQ=TVA, AR=note
 """
 
-import zipfile
+import zipfile, re
 from io import BytesIO
 from datetime import datetime
 import pandas as pd
@@ -13,7 +14,6 @@ from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 from reportlab.lib.colors import HexColor, black, white
 
-# ── COULEURS ──────────────────────────────────────────────────
 DARK   = HexColor("#1a1a1a")
 GREY   = HexColor("#6c757d")
 LGREY  = HexColor("#adb5bd")
@@ -34,169 +34,141 @@ def thin_line(c, y, x1=10, x2=200):
 
 # ── LECTURE EXCEL ─────────────────────────────────────────────
 def lire_factures(fichier_io, annee):
-    """
-    Lit l'onglet de l'année et retourne une liste de dicts facture,
-    triés par date de soirée (ordre chronologique).
-    """
     year_str = str(annee)
     try:
         df = pd.read_excel(fichier_io, sheet_name=year_str, header=None)
     except Exception as e:
         return None, f"Onglet '{year_str}' introuvable : {e}"
 
-    factures = []
+    # Trouver ligne header (contient "Date pièce" ou "Code Client")
+    data_start = 22  # défaut 2025
+    for i in range(min(25, len(df))):
+        row = df.iloc[i]
+        for v in row:
+            if str(v).strip() in ('Date pièce','Date piece','FA25000001','FA24000002'):
+                data_start = i
+                break
+        else:
+            continue
+        break
 
-    # Détecter la structure selon l'année
-    # 2022 : structure ancienne (pas de N° facture, pas TTC/HT/TVA séparés)
-    # 2023+ : structure complète avec colonnes TTC/HT/TVA
-
-    # Trouver les colonnes TTC/HT/TVA depuis header
-    col_ttc = col_ht = col_tva = col_comment = None
-    col_num_fa = None
-
-    # Chercher dans les 2 premières lignes
-    for li in range(2):
-        row_h = df.iloc[li]
-        for ci, v in enumerate(row_h):
+    # Trouver colonnes TTC/HT/TVA depuis la ligne header (ligne data_start - 1)
+    col_ttc = col_ht = col_tva = col_note = None
+    if data_start > 0:
+        h = df.iloc[data_start - 1]
+        for ci, v in enumerate(h):
             vs = str(v).strip().upper()
-            if vs == 'TTC':          col_ttc     = ci
-            if vs in ('H.T','HT'):   col_ht      = ci
-            if vs == 'TVA':          col_tva     = ci
-            if 'COMMENT' in vs:      col_comment = ci
-            if 'FACTURE' in vs or vs == 'FACTURE N°': col_num_fa = ci
+            if 'TTC' in vs:              col_ttc  = ci
+            if vs in ('MONTANT H.T','H.T','HT','MONTANT HT'): col_ht = ci
+            if 'TVA' in vs:              col_tva  = ci
+            if 'COMMENT' in vs or 'NOTE' in vs: col_note = ci
 
-    # Détecter ligne de début des données
-    data_start = 0
-    for li in range(min(5, len(df))):
-        v0 = df.iloc[li, 0]
-        if isinstance(v0, (datetime,)) or (isinstance(v0, str) and '/' in v0):
-            data_start = li
-            break
-        try:
-            pd.to_datetime(v0)
-            data_start = li
-            break
-        except:
-            pass
+    # Fallback colonnes 2025 connues
+    if col_ttc  is None: col_ttc  = 39
+    if col_ht   is None: col_ht   = 40
+    if col_tva  is None: col_tva  = 41
+    if col_note is None: col_note = 42
 
+    factures = []
     for idx in range(data_start, len(df)):
         row = df.iloc[idx]
 
-        # Colonne 0 = date soirée
+        # Col A = date soirée
         v0 = row.iloc[0]
+        date_soiree = None
         try:
             date_soiree = pd.to_datetime(v0)
+            if pd.isnull(date_soiree): date_soiree = None
         except:
+            # Cas "16-17/04/25" ou "18-19/04/2025" → prendre première date
+            if isinstance(v0, str):
+                m = re.search(r'(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})', v0)
+                if m:
+                    try:
+                        day = m.group(1).split('-')[-1] if '-' in m.group(1) else m.group(1)
+                        yr  = m.group(3) if len(m.group(3))==4 else f"20{m.group(3)}"
+                        date_soiree = pd.to_datetime(f"{day}/{m.group(2)}/{yr}", dayfirst=True)
+                    except: pass
+
+        if date_soiree is None or pd.isnull(date_soiree):
             continue
-        if pd.isnull(date_soiree):
+
+        # Col B = N° facture
+        num_fa = str(row.iloc[1]).strip()
+        if not num_fa.startswith('FA'):
             continue
 
-        # N° facture
-        num_fa = str(row.iloc[1]).strip() if col_num_fa is None else str(row.iloc[col_num_fa]).strip()
-        if 'nan' in num_fa.lower() or not num_fa.startswith('FA'):
-            # Générer numéro si absent (cas 2022)
-            num_fa = f"FA{str(annee)[2:]}{'%06d' % (len(factures)+1)}"
+        # Col C = ignoré
+        # Col D = nom client
+        client_nom = str(row.iloc[3]).strip() if len(row) > 3 else ''
+        if client_nom in ('nan',''): client_nom = ''
 
-        # Client — nom
-        client_nom = str(row.iloc[2]).strip() if str(row.iloc[2]) not in ('nan','') else ''
+        # Col E = adresse, F = CP, G = ville
+        adr  = str(row.iloc[4]).strip() if len(row) > 4 else ''
+        cp   = str(row.iloc[5]).strip() if len(row) > 5 else ''
+        ville= str(row.iloc[6]).strip() if len(row) > 6 else ''
+        if adr   in ('nan',''): adr   = ''
+        if cp    in ('nan',''): cp    = ''
+        if ville in ('nan',''): ville = ''
 
-        # Adresse : col 3 contient souvent "rue - CP VILLE"
-        adr_raw = str(row.iloc[3]).strip() if str(row.iloc[3]) not in ('nan','') else ''
-        if ' - ' in adr_raw:
-            parts = adr_raw.split(' - ', 1)
-            client_adr1 = parts[0].strip()
-            client_adr2 = parts[1].strip()
-        else:
-            # Essayer split sur le code postal (5 chiffres)
-            import re
-            m = re.search(r'(\d{5})', adr_raw)
-            if m:
-                idx_cp = adr_raw.index(m.group())
-                client_adr1 = adr_raw[:idx_cp].strip().rstrip(',').strip()
-                client_adr2 = adr_raw[idx_cp:].strip()
-            else:
-                # Cas 2022 : CP et VILLE séparés
-                cp   = str(row.iloc[4]).strip() if len(row) > 4 else ''
-                ville= str(row.iloc[5]).strip() if len(row) > 5 else ''
-                client_adr1 = adr_raw
-                client_adr2 = f"{cp} {ville}".strip() if cp not in ('nan','') else ''
+        # Construire adresse sur 2 lignes
+        client_adr1 = adr
+        client_adr2 = f"{cp} {ville}".strip() if cp or ville else ''
 
         # TTC / HT / TVA
-        ttc = tva = ht = 0.0
-        if col_ttc is not None:
-            try: ttc = float(row.iloc[col_ttc])
-            except: ttc = 0.0
-        if col_ht is not None:
-            try: ht = float(row.iloc[col_ht])
-            except: ht = 0.0
-        if col_tva is not None:
-            try: tva = float(row.iloc[col_tva])
-            except: tva = 0.0
-
-        # Si pas de colonnes dédiées → calculer
-        if ttc == 0:
-            # Chercher dans les colonnes finales
-            for ci in range(len(row)-1, max(len(row)-6, 0), -1):
-                try:
-                    v = float(row.iloc[ci])
-                    if v > 0 and ttc == 0:
-                        ttc = v
-                    elif v > 0 and ht == 0 and v < ttc:
-                        ht = v
-                    elif v > 0 and tva == 0 and v < ht:
-                        tva = v
-                except:
-                    pass
+        try: ttc = float(row.iloc[col_ttc])
+        except: ttc = 0.0
+        try: ht = float(row.iloc[col_ht])
+        except: ht = 0.0
+        try: tva = float(row.iloc[col_tva])
+        except: tva = 0.0
         if ttc > 0 and ht == 0:
             ht  = round(ttc / 1.2, 2)
             tva = round(ttc - ht, 2)
 
-        # Code client — générer depuis numéro facture
-        num_seq = ''.join(filter(str.isdigit, num_fa))
-        code_client = f"210{num_seq[-5:]}" if len(num_seq) >= 5 else f"21{num_seq}"
-
-        # Règlements — pattern : col 4=montant, 5=date, 6=ref, 7=banque, puis +4 par règlement
+        # Règlements : col 7..col_ttc-1, groupes de (montant, date, mode, banque) par 4
         reglements = []
-        # Détecter nb colonnes règlements dynamiquement
-        # Pattern connu : (montant, date, ref/mode, banque) par groupe de 4 à partir col 4
-        ci = 4
-        while ci + 1 < (col_ttc or len(row)):
+        ci = 7
+        while ci + 1 < col_ttc:
             try:
                 mt = row.iloc[ci]
-                dt = row.iloc[ci+1]
-                if pd.isnull(mt) or str(mt) in ('nan',''):
+                if str(mt) in ('nan','') or pd.isnull(mt):
                     ci += 4; continue
                 mt_f = float(mt)
                 if mt_f <= 0:
                     ci += 4; continue
-                # date
+                # date règlement
                 try:
-                    dt_fmt = pd.to_datetime(dt).strftime('%d/%m/%Y')
+                    dt_fmt = pd.to_datetime(row.iloc[ci+1]).strftime('%d/%m/%Y')
                 except:
-                    dt_fmt = str(dt)[:10]
-                # ref et banque
-                ref   = str(row.iloc[ci+2]).strip() if ci+2 < len(row) else ''
-                banque= str(row.iloc[ci+3]).strip() if ci+3 < len(row) else ''
-                if ref in ('nan','-',''):   ref = ''
+                    dt_fmt = ''
+                # mode et banque
+                mode  = str(row.iloc[ci+2]).strip() if ci+2 < col_ttc else ''
+                banque= str(row.iloc[ci+3]).strip() if ci+3 < col_ttc else ''
+                if mode   in ('nan','-',''): mode   = 'VIRT'
                 if banque in ('nan','-',''): banque = ''
-                mode = f"{banque} N° {ref}".strip(' N° ') if ref else banque if banque else 'VIRT'
-                reglements.append((mode, ref, mt_f, dt_fmt))
+                # Libellé affiché
+                if banque and banque != mode:
+                    libelle = f"{banque} N° {mode}" if mode not in ('VIRT','CHQ','LCL','BNP','SG','S.G','C.E','CDC','B.POST','B. POST','B. POP') else f"{mode} {banque}".strip()
+                else:
+                    libelle = mode
+                reglements.append((libelle, '', mt_f, dt_fmt))
             except:
                 pass
             ci += 4
 
-        # Commentaire / note
+        # Note
         note = ''
-        if col_comment is not None:
-            note = str(row.iloc[col_comment]).strip()
+        try:
+            note = str(row.iloc[col_note]).strip()
             if note.lower() == 'nan': note = ''
+        except: pass
 
         factures.append({
             'num_facture'  : num_fa,
             'date_facture' : date_soiree.strftime('%d/%m/%Y'),
             'date_soiree'  : date_soiree.strftime('%d/%m/%Y'),
             'date_sort'    : date_soiree,
-            'code_client'  : code_client,
             'client_nom'   : client_nom,
             'client_adr1'  : client_adr1,
             'client_adr2'  : client_adr2,
@@ -212,7 +184,6 @@ def lire_factures(fichier_io, annee):
 
     # Tri chronologique strict
     factures.sort(key=lambda x: x['date_sort'])
-
     return factures, None
 
 
@@ -244,35 +215,36 @@ def generer_pdf(d):
 
     # CLIENT
     c.setFillColor(XLIGHT)
-    c.roundRect(108*mm, H-82*mm, 90*mm, 44*mm, 3*mm, fill=1, stroke=0)
+    c.roundRect(108*mm, H-78*mm, 90*mm, 40*mm, 3*mm, fill=1, stroke=0)
     c.setFillColor(DARK); c.setFont("Helvetica-Bold", 8)
     c.drawString(112*mm, H-38*mm, "CLIENT :")
     c.setFont("Helvetica-Bold", 10); c.setFillColor(BLACK)
-    c.drawString(112*mm, H-45*mm, d["client_nom"])
+    c.drawString(112*mm, H-46*mm, d["client_nom"])
     c.setFont("Helvetica", 9)
-    c.drawString(112*mm, H-52*mm, d["client_adr1"])
+    if d.get("client_adr1"):
+        c.drawString(112*mm, H-53*mm, d["client_adr1"])
     if d.get("client_adr2"):
-        c.drawString(112*mm, H-58*mm, d["client_adr2"])
+        c.drawString(112*mm, H-60*mm, d["client_adr2"])
 
     # INFOS PIÈCE
-    thin_line(c, (H/mm)-88)
+    thin_line(c, (H/mm)-84)
     x = 12
     for label, val in [("N° Pièce", d["num_facture"]), ("Date pièce", d["date_facture"]),
                         ("Montant TTC", fmt(d["montant_ttc"])), ("Échéance", d["date_facture"])]:
         c.setFillColor(GREY); c.setFont("Helvetica", 8)
-        c.drawString(x*mm, (H/mm-93)*mm, label)
+        c.drawString(x*mm, (H/mm-89)*mm, label)
         c.setFillColor(DARK); c.setFont("Helvetica-Bold", 9)
-        c.drawString(x*mm, (H/mm-99)*mm, val)
+        c.drawString(x*mm, (H/mm-95)*mm, val)
         x += 47
-    thin_line(c, (H/mm)-103)
+    thin_line(c, (H/mm)-99)
 
     # RÉFÉRENCE
     c.setFillColor(DARK); c.setFont("Helvetica-Bold", 9)
-    c.drawString(12*mm, (H/mm-109)*mm, f"Réf. commande : SOIREE DU {d['date_soiree']}")
-    thin_line(c, (H/mm)-113)
+    c.drawString(12*mm, (H/mm-105)*mm, f"Réf. commande : SOIREE DU {d['date_soiree']}")
+    thin_line(c, (H/mm)-109)
 
     # TABLEAU DÉSIGNATION
-    yh = (H/mm-124)*mm
+    yh = (H/mm-120)*mm
     c.setFillColor(DARK); c.rect(10*mm, yh, 190*mm, 8*mm, fill=1, stroke=0)
     c.setFillColor(white); c.setFont("Helvetica-Bold", 8.5)
     for txt, xp in [("CODE",12),("DÉSIGNATION",38),("QTÉ",130),("PU HT",150),("MONTANT HT",172)]:
@@ -297,20 +269,18 @@ def generer_pdf(d):
     c.setFillColor(DARK); c.rect(10*mm, yr, 190*mm, 7*mm, fill=1, stroke=0)
     c.setFillColor(white); c.setFont("Helvetica-Bold", 8.5)
     c.drawString(12*mm,  yr+2*mm, "RÈGLEMENTS REÇUS")
-    c.drawString(100*mm, yr+2*mm, "N° / RÉFÉRENCE")
-    c.drawString(150*mm, yr+2*mm, "MONTANT")
-    c.drawString(175*mm, yr+2*mm, "DATE")
+    c.drawString(110*mm, yr+2*mm, "MONTANT")
+    c.drawString(155*mm, yr+2*mm, "DATE")
     alt = True
-    for mode, ref, montant, date in d["reglements"]:
+    for libelle, _, montant, date in d["reglements"]:
         yr -= 8*mm
         if alt:
             c.setFillColor(XLIGHT); c.rect(10*mm, yr, 190*mm, 8*mm, fill=1, stroke=0)
         alt = not alt
         c.setFillColor(BLACK); c.setFont("Helvetica", 9)
-        c.drawString(12*mm,  yr+2.5*mm, mode)
-        c.drawString(100*mm, yr+2.5*mm, ref)
-        c.drawRightString(163*mm, yr+2.5*mm, fmt(montant))
-        c.drawString(175*mm, yr+2.5*mm, date)
+        c.drawString(12*mm,  yr+2.5*mm, libelle)
+        c.drawRightString(125*mm, yr+2.5*mm, fmt(montant))
+        c.drawString(155*mm, yr+2.5*mm, date)
 
     thin_line(c, (yr-4)/mm)
 
@@ -351,10 +321,6 @@ def generer_pdf(d):
 
 # ── FONCTION PRINCIPALE ───────────────────────────────────────
 def run_gfs(fichier_io, annee):
-    """
-    Entrée  : fichier Excel (BytesIO), année (int)
-    Sortie  : (zip_buffer, nom_zip, stats) ou (None, None, message_erreur)
-    """
     factures, err = lire_factures(fichier_io, annee)
     if err:
         return None, None, err
@@ -364,17 +330,17 @@ def run_gfs(fichier_io, annee):
         for f in factures:
             pdf = generer_pdf(f)
             nom_client = f['client_nom'].replace(' ','_').replace('/','_')[:30]
-            date_fmt = f['date_soiree'].replace('/','_')
-            fname = f"{f['num_facture']}_{nom_client}_{date_fmt}.pdf"
+            date_fmt   = f['date_soiree'].replace('/','_')
+            fname      = f"{f['num_facture']}_{nom_client}_{date_fmt}.pdf"
             zf.writestr(fname, pdf.read())
 
     buf_zip.seek(0)
     nom_zip = f"SOGEPA_FACTURES_SALLE_{annee}.zip"
     stats = {
-        'nb'       : len(factures),
-        'annee'    : annee,
-        'nom_zip'  : nom_zip,
-        'premiere' : factures[0]['num_facture'],
-        'derniere' : factures[-1]['num_facture'],
+        'nb'      : len(factures),
+        'annee'   : annee,
+        'nom_zip' : nom_zip,
+        'premiere': factures[0]['num_facture'],
+        'derniere': factures[-1]['num_facture'],
     }
     return buf_zip, nom_zip, stats
