@@ -138,8 +138,10 @@ else:
     else:
         if not loyers_file_rq: st.error("⚠️ Veuillez charger le tableau des loyers."); st.stop()
         if societe_sel=="M.A LA GARENNE": st.warning("⚠️ M.A LA GARENNE : pas d'avis configuré."); st.stop()
+        from io import BytesIO as _BytesIO
+        loyers_bytes = _BytesIO(loyers_file_rq.read()); loyers_bytes.seek(0)
         with st.spinner(f"📄 Génération — {societe_sel} · {mois_sel} {int(annee_sel)}..."):
-            result_avis, result_quit, stats = run_ra_rq(loyers_file_rq, societe_sel, mois_num, int(annee_sel))
+            result_avis, result_quit, stats = run_ra_rq(loyers_bytes, societe_sel, mois_num, int(annee_sel))
         if isinstance(stats, str): st.error(f"❌ {stats}"); st.stop()
         c1,c2,c3=st.columns(3)
         with c1: st.markdown(f'<div class="stat-card stat-total"><div class="stat-num" style="color:#3b82f6">{stats["nb_locataires"]}</div><div class="stat-lbl">Locataires</div></div>',unsafe_allow_html=True)
