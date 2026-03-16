@@ -253,8 +253,6 @@ def generer_pdf(d):
     c.drawString(112*mm, H-52*mm, d["client_adr1"])
     if d.get("client_adr2"):
         c.drawString(112*mm, H-58*mm, d["client_adr2"])
-    c.setFont("Helvetica-Bold", 8.5); c.setFillColor(GREY)
-    c.drawString(112*mm, H-67*mm, f"Code client : {d['code_client']}")
 
     # INFOS PIÈCE
     thin_line(c, (H/mm)-88)
@@ -366,7 +364,8 @@ def run_gfs(fichier_io, annee):
         for f in factures:
             pdf = generer_pdf(f)
             nom_client = f['client_nom'].replace(' ','_').replace('/','_')[:30]
-            fname = f"{f['num_facture']}_{nom_client}.pdf"
+            date_fmt = f['date_soiree'].replace('/','_')
+            fname = f"{f['num_facture']}_{nom_client}_{date_fmt}.pdf"
             zf.writestr(fname, pdf.read())
 
     buf_zip.seek(0)
