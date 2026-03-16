@@ -1,0 +1,381 @@
+"""
+Robot GFS — Génération Facture Salle
+Lit le fichier RECAP_SOIREES_A_FACTURER et génère un ZIP de factures PDF
+par année sélectionnée, en ordre chronologique strict.
+"""
+
+import zipfile
+from io import BytesIO
+from datetime import datetime
+import pandas as pd
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.pdfgen import canvas
+from reportlab.lib.colors import HexColor, black, white
+
+# ── COULEURS ──────────────────────────────────────────────────
+DARK   = HexColor("#1a1a1a")
+GREY   = HexColor("#6c757d")
+LGREY  = HexColor("#adb5bd")
+XLIGHT = HexColor("#f4f4f4")
+BLACK  = black
+
+MOIS_NOMS = {
+    1:"JANVIER",2:"FEVRIER",3:"MARS",4:"AVRIL",5:"MAI",6:"JUIN",
+    7:"JUILLET",8:"AOUT",9:"SEPTEMBRE",10:"OCTOBRE",11:"NOVEMBRE",12:"DECEMBRE"
+}
+
+def fmt(v):
+    return f"{v:,.2f}".replace(",","X").replace(".",",").replace("X"," ") + " €"
+
+def thin_line(c, y, x1=10, x2=200):
+    c.setStrokeColor(BLACK); c.setLineWidth(0.5)
+    c.line(x1*mm, y*mm, x2*mm, y*mm)
+
+# ── LECTURE EXCEL ─────────────────────────────────────────────
+def lire_factures(fichier_io, annee):
+    """
+    Lit l'onglet de l'année et retourne une liste de dicts facture,
+    triés par date de soirée (ordre chronologique).
+    """
+    year_str = str(annee)
+    try:
+        df = pd.read_excel(fichier_io, sheet_name=year_str, header=None)
+    except Exception as e:
+        return None, f"Onglet '{year_str}' introuvable : {e}"
+
+    factures = []
+
+    # Détecter la structure selon l'année
+    # 2022 : structure ancienne (pas de N° facture, pas TTC/HT/TVA séparés)
+    # 2023+ : structure complète avec colonnes TTC/HT/TVA
+
+    # Trouver les colonnes TTC/HT/TVA depuis header
+    col_ttc = col_ht = col_tva = col_comment = None
+    col_num_fa = None
+
+    # Chercher dans les 2 premières lignes
+    for li in range(2):
+        row_h = df.iloc[li]
+        for ci, v in enumerate(row_h):
+            vs = str(v).strip().upper()
+            if vs == 'TTC':          col_ttc     = ci
+            if vs in ('H.T','HT'):   col_ht      = ci
+            if vs == 'TVA':          col_tva     = ci
+            if 'COMMENT' in vs:      col_comment = ci
+            if 'FACTURE' in vs or vs == 'FACTURE N°': col_num_fa = ci
+
+    # Détecter ligne de début des données
+    data_start = 0
+    for li in range(min(5, len(df))):
+        v0 = df.iloc[li, 0]
+        if isinstance(v0, (datetime,)) or (isinstance(v0, str) and '/' in v0):
+            data_start = li
+            break
+        try:
+            pd.to_datetime(v0)
+            data_start = li
+            break
+        except:
+            pass
+
+    for idx in range(data_start, len(df)):
+        row = df.iloc[idx]
+
+        # Colonne 0 = date soirée
+        v0 = row.iloc[0]
+        try:
+            date_soiree = pd.to_datetime(v0)
+        except:
+            continue
+        if pd.isnull(date_soiree):
+            continue
+
+        # N° facture
+        num_fa = str(row.iloc[1]).strip() if col_num_fa is None else str(row.iloc[col_num_fa]).strip()
+        if 'nan' in num_fa.lower() or not num_fa.startswith('FA'):
+            # Générer numéro si absent (cas 2022)
+            num_fa = f"FA{str(annee)[2:]}{'%06d' % (len(factures)+1)}"
+
+        # Client — nom
+        client_nom = str(row.iloc[2]).strip() if str(row.iloc[2]) not in ('nan','') else ''
+
+        # Adresse : col 3 contient souvent "rue - CP VILLE"
+        adr_raw = str(row.iloc[3]).strip() if str(row.iloc[3]) not in ('nan','') else ''
+        if ' - ' in adr_raw:
+            parts = adr_raw.split(' - ', 1)
+            client_adr1 = parts[0].strip()
+            client_adr2 = parts[1].strip()
+        else:
+            # Essayer split sur le code postal (5 chiffres)
+            import re
+            m = re.search(r'(\d{5})', adr_raw)
+            if m:
+                idx_cp = adr_raw.index(m.group())
+                client_adr1 = adr_raw[:idx_cp].strip().rstrip(',').strip()
+                client_adr2 = adr_raw[idx_cp:].strip()
+            else:
+                # Cas 2022 : CP et VILLE séparés
+                cp   = str(row.iloc[4]).strip() if len(row) > 4 else ''
+                ville= str(row.iloc[5]).strip() if len(row) > 5 else ''
+                client_adr1 = adr_raw
+                client_adr2 = f"{cp} {ville}".strip() if cp not in ('nan','') else ''
+
+        # TTC / HT / TVA
+        ttc = tva = ht = 0.0
+        if col_ttc is not None:
+            try: ttc = float(row.iloc[col_ttc])
+            except: ttc = 0.0
+        if col_ht is not None:
+            try: ht = float(row.iloc[col_ht])
+            except: ht = 0.0
+        if col_tva is not None:
+            try: tva = float(row.iloc[col_tva])
+            except: tva = 0.0
+
+        # Si pas de colonnes dédiées → calculer
+        if ttc == 0:
+            # Chercher dans les colonnes finales
+            for ci in range(len(row)-1, max(len(row)-6, 0), -1):
+                try:
+                    v = float(row.iloc[ci])
+                    if v > 0 and ttc == 0:
+                        ttc = v
+                    elif v > 0 and ht == 0 and v < ttc:
+                        ht = v
+                    elif v > 0 and tva == 0 and v < ht:
+                        tva = v
+                except:
+                    pass
+        if ttc > 0 and ht == 0:
+            ht  = round(ttc / 1.2, 2)
+            tva = round(ttc - ht, 2)
+
+        # Code client — générer depuis numéro facture
+        num_seq = ''.join(filter(str.isdigit, num_fa))
+        code_client = f"210{num_seq[-5:]}" if len(num_seq) >= 5 else f"21{num_seq}"
+
+        # Règlements — pattern : col 4=montant, 5=date, 6=ref, 7=banque, puis +4 par règlement
+        reglements = []
+        # Détecter nb colonnes règlements dynamiquement
+        # Pattern connu : (montant, date, ref/mode, banque) par groupe de 4 à partir col 4
+        ci = 4
+        while ci + 1 < (col_ttc or len(row)):
+            try:
+                mt = row.iloc[ci]
+                dt = row.iloc[ci+1]
+                if pd.isnull(mt) or str(mt) in ('nan',''):
+                    ci += 4; continue
+                mt_f = float(mt)
+                if mt_f <= 0:
+                    ci += 4; continue
+                # date
+                try:
+                    dt_fmt = pd.to_datetime(dt).strftime('%d/%m/%Y')
+                except:
+                    dt_fmt = str(dt)[:10]
+                # ref et banque
+                ref   = str(row.iloc[ci+2]).strip() if ci+2 < len(row) else ''
+                banque= str(row.iloc[ci+3]).strip() if ci+3 < len(row) else ''
+                if ref in ('nan','-',''):   ref = ''
+                if banque in ('nan','-',''): banque = ''
+                mode = f"{banque} N° {ref}".strip(' N° ') if ref else banque if banque else 'VIRT'
+                reglements.append((mode, ref, mt_f, dt_fmt))
+            except:
+                pass
+            ci += 4
+
+        # Commentaire / note
+        note = ''
+        if col_comment is not None:
+            note = str(row.iloc[col_comment]).strip()
+            if note.lower() == 'nan': note = ''
+
+        factures.append({
+            'num_facture'  : num_fa,
+            'date_facture' : date_soiree.strftime('%d/%m/%Y'),
+            'date_soiree'  : date_soiree.strftime('%d/%m/%Y'),
+            'date_sort'    : date_soiree,
+            'code_client'  : code_client,
+            'client_nom'   : client_nom,
+            'client_adr1'  : client_adr1,
+            'client_adr2'  : client_adr2,
+            'montant_ttc'  : round(ttc, 2),
+            'montant_ht'   : round(ht, 2),
+            'tva'          : round(tva, 2),
+            'reglements'   : reglements,
+            'note'         : note,
+        })
+
+    if not factures:
+        return None, f"Aucune facture trouvée pour {annee}"
+
+    # Tri chronologique strict
+    factures.sort(key=lambda x: x['date_sort'])
+
+    return factures, None
+
+
+# ── GÉNÉRATION PDF ────────────────────────────────────────────
+def generer_pdf(d):
+    buf = BytesIO()
+    c   = canvas.Canvas(buf, pagesize=A4)
+    W, H = A4
+
+    # BANDE TITRE
+    c.setFillColor(DARK)
+    c.rect(0, H-30*mm, W, 30*mm, fill=1, stroke=0)
+    c.setFillColor(white); c.setFont("Helvetica-Bold", 20)
+    c.drawCentredString(W/2, H-18*mm, "FACTURE")
+    c.setFont("Helvetica", 9)
+    c.drawCentredString(W/2, H-26*mm,
+        f"Éditée en Euro  —  N° {d['num_facture']}  —  Date : {d['date_facture']}")
+
+    # SOGEPA
+    y0 = H - 40*mm
+    c.setFillColor(DARK); c.setFont("Helvetica-Bold", 11)
+    c.drawString(12*mm, y0, "SOGEPA")
+    c.setFont("Helvetica", 8.5); c.setFillColor(BLACK)
+    for ligne in ["SAS au capital de 15 000 €","29, RUE DU PROGRES",
+                  "93107 MONTREUIL CEDEX","Tél : 01.48.70.41.26",
+                  "SIRET : 43926359100018"]:
+        y0 -= 5*mm
+        c.drawString(12*mm, y0, ligne)
+
+    # CLIENT
+    c.setFillColor(XLIGHT)
+    c.roundRect(108*mm, H-82*mm, 90*mm, 44*mm, 3*mm, fill=1, stroke=0)
+    c.setFillColor(DARK); c.setFont("Helvetica-Bold", 8)
+    c.drawString(112*mm, H-38*mm, "CLIENT :")
+    c.setFont("Helvetica-Bold", 10); c.setFillColor(BLACK)
+    c.drawString(112*mm, H-45*mm, d["client_nom"])
+    c.setFont("Helvetica", 9)
+    c.drawString(112*mm, H-52*mm, d["client_adr1"])
+    if d.get("client_adr2"):
+        c.drawString(112*mm, H-58*mm, d["client_adr2"])
+    c.setFont("Helvetica-Bold", 8.5); c.setFillColor(GREY)
+    c.drawString(112*mm, H-67*mm, f"Code client : {d['code_client']}")
+
+    # INFOS PIÈCE
+    thin_line(c, (H/mm)-88)
+    x = 12
+    for label, val in [("N° Pièce", d["num_facture"]), ("Date pièce", d["date_facture"]),
+                        ("Montant TTC", fmt(d["montant_ttc"])), ("Échéance", d["date_facture"])]:
+        c.setFillColor(GREY); c.setFont("Helvetica", 8)
+        c.drawString(x*mm, (H/mm-93)*mm, label)
+        c.setFillColor(DARK); c.setFont("Helvetica-Bold", 9)
+        c.drawString(x*mm, (H/mm-99)*mm, val)
+        x += 47
+    thin_line(c, (H/mm)-103)
+
+    # RÉFÉRENCE
+    c.setFillColor(DARK); c.setFont("Helvetica-Bold", 9)
+    c.drawString(12*mm, (H/mm-109)*mm, f"Réf. commande : SOIREE DU {d['date_soiree']}")
+    thin_line(c, (H/mm)-113)
+
+    # TABLEAU DÉSIGNATION
+    yh = (H/mm-124)*mm
+    c.setFillColor(DARK); c.rect(10*mm, yh, 190*mm, 8*mm, fill=1, stroke=0)
+    c.setFillColor(white); c.setFont("Helvetica-Bold", 8.5)
+    for txt, xp in [("CODE",12),("DÉSIGNATION",38),("QTÉ",130),("PU HT",150),("MONTANT HT",172)]:
+        c.drawString(xp*mm, yh+2.5*mm, txt)
+
+    yrow = yh - 9*mm
+    c.setFillColor(XLIGHT); c.rect(10*mm, yrow, 190*mm, 9*mm, fill=1, stroke=0)
+    c.setFillColor(BLACK); c.setFont("Helvetica", 9)
+    c.drawString(12*mm,  yrow+2.8*mm, "LSER")
+    c.drawString(38*mm,  yrow+2.8*mm, "LOCATION SALLE ESPACE ROYAL")
+    c.drawString(131*mm, yrow+2.8*mm, "1,000")
+    c.drawRightString(160*mm, yrow+2.8*mm, fmt(d["montant_ht"]))
+    c.drawRightString(197*mm, yrow+2.8*mm, fmt(d["montant_ht"]))
+    c.setFont("Helvetica-Oblique", 8.5); c.setFillColor(GREY)
+    c.drawString(38*mm, yrow-5*mm,  f"Soirée du {d['date_soiree']}")
+    c.drawString(38*mm, yrow-11*mm, "Location salle :")
+    c.setFont("Helvetica", 8.5); c.setFillColor(BLACK)
+    c.drawString(38*mm, yrow-17*mm, "6, RUE DE VALMY — 93107 MONTREUIL CEDEX")
+
+    # RÈGLEMENTS
+    yr = yrow - 35*mm
+    c.setFillColor(DARK); c.rect(10*mm, yr, 190*mm, 7*mm, fill=1, stroke=0)
+    c.setFillColor(white); c.setFont("Helvetica-Bold", 8.5)
+    c.drawString(12*mm,  yr+2*mm, "RÈGLEMENTS REÇUS")
+    c.drawString(100*mm, yr+2*mm, "N° / RÉFÉRENCE")
+    c.drawString(150*mm, yr+2*mm, "MONTANT")
+    c.drawString(175*mm, yr+2*mm, "DATE")
+    alt = True
+    for mode, ref, montant, date in d["reglements"]:
+        yr -= 8*mm
+        if alt:
+            c.setFillColor(XLIGHT); c.rect(10*mm, yr, 190*mm, 8*mm, fill=1, stroke=0)
+        alt = not alt
+        c.setFillColor(BLACK); c.setFont("Helvetica", 9)
+        c.drawString(12*mm,  yr+2.5*mm, mode)
+        c.drawString(100*mm, yr+2.5*mm, ref)
+        c.drawRightString(163*mm, yr+2.5*mm, fmt(montant))
+        c.drawString(175*mm, yr+2.5*mm, date)
+
+    thin_line(c, (yr-4)/mm)
+
+    # TOTAUX
+    yt = yr - 10*mm
+    for label, val in [("Montant HT", d["montant_ht"]),
+                        ("TVA 20 %",   d["tva"]),
+                        ("Montant TTC", d["montant_ttc"])]:
+        c.setFont("Helvetica", 9); c.setFillColor(GREY)
+        c.drawRightString(155*mm, yt, label)
+        c.setFont("Helvetica-Bold", 9); c.setFillColor(BLACK)
+        c.drawRightString(197*mm, yt, fmt(val))
+        yt -= 7*mm
+
+    yt -= 3*mm
+    c.setFillColor(DARK)
+    c.roundRect(120*mm, yt-4*mm, 78*mm, 12*mm, 2*mm, fill=1, stroke=0)
+    c.setFillColor(white); c.setFont("Helvetica-Bold", 10)
+    c.drawString(124*mm, yt+1*mm, "NET À PAYER")
+    c.drawRightString(196*mm, yt+1*mm, fmt(d["montant_ttc"]))
+
+    if d.get("note"):
+        c.setFont("Helvetica-Oblique", 8); c.setFillColor(GREY)
+        c.drawString(12*mm, yt+1*mm, f"Note : {d['note']}")
+
+    # MENTIONS LÉGALES
+    thin_line(c, 22)
+    c.setFont("Helvetica", 7); c.setFillColor(GREY)
+    c.drawCentredString(W/2, 17*mm,
+        "En cas de retard de paiement, une pénalité de 3 fois le taux d'intérêt légal sera appliquée, "
+        "ainsi qu'une indemnité forfaitaire de 40 € pour frais de recouvrement.")
+    c.drawCentredString(W/2, 13*mm,
+        "SOGEPA — SAS au capital de 15 000 € — SIRET 43926359100018 — TVA intracommunautaire : FR 12 439 263 591")
+
+    c.save(); buf.seek(0)
+    return buf
+
+
+# ── FONCTION PRINCIPALE ───────────────────────────────────────
+def run_gfs(fichier_io, annee):
+    """
+    Entrée  : fichier Excel (BytesIO), année (int)
+    Sortie  : (zip_buffer, nom_zip, stats) ou (None, None, message_erreur)
+    """
+    factures, err = lire_factures(fichier_io, annee)
+    if err:
+        return None, None, err
+
+    buf_zip = BytesIO()
+    with zipfile.ZipFile(buf_zip, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for f in factures:
+            pdf = generer_pdf(f)
+            nom_client = f['client_nom'].replace(' ','_').replace('/','_')[:30]
+            fname = f"{f['num_facture']}_{nom_client}.pdf"
+            zf.writestr(fname, pdf.read())
+
+    buf_zip.seek(0)
+    nom_zip = f"SOGEPA_FACTURES_SALLE_{annee}.zip"
+    stats = {
+        'nb'       : len(factures),
+        'annee'    : annee,
+        'nom_zip'  : nom_zip,
+        'premiere' : factures[0]['num_facture'],
+        'derniere' : factures[-1]['num_facture'],
+    }
+    return buf_zip, nom_zip, stats
