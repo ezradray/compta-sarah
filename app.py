@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from robot_ac_gl import run, MOIS_NOMS
 from robot_ra_rq import run_ra_rq
+from robot_gfs import run_gfs
 
 st.set_page_config(page_title="Compta Sarah", page_icon="💼", layout="wide", initial_sidebar_state="expanded")
 
@@ -44,13 +45,16 @@ with st.sidebar:
     st.markdown('<div class="logo-block"><div class="logo-title">💼 Compta Sarah</div><div class="logo-sub">La belle vie, occupe toi de ton mari</div></div>', unsafe_allow_html=True)
 
     st.markdown("<span style='font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#5b7fa6'>🤖 Robots</span>", unsafe_allow_html=True)
-    c1,c2 = st.columns(2)
+    c1,c2,c3 = st.columns(3)
     with c1:
         if st.button("🏦 Rapprochement & Attribution", use_container_width=True, type="primary" if st.session_state.robot=="AC_GL" else "secondary"):
             st.session_state.robot="AC_GL"; st.rerun()
     with c2:
         if st.button("📄 Avis & Quittances", use_container_width=True, type="primary" if st.session_state.robot=="RA_RQ" else "secondary"):
             st.session_state.robot="RA_RQ"; st.rerun()
+    with c3:
+        if st.button("🧾 Factures Salle", use_container_width=True, type="primary" if st.session_state.robot=="GFS" else "secondary"):
+            st.session_state.robot="GFS"; st.rerun()
 
     st.markdown("---")
     st.markdown("<span style='font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#5b7fa6'>🏢 Société</span>", unsafe_allow_html=True)
@@ -72,6 +76,13 @@ with st.sidebar:
         st.markdown("<span style='font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#5b7fa6'>📂 Fichier</span>", unsafe_allow_html=True)
         loyers_file_rq = st.file_uploader("Tableau Loyers", type=["xlsx"], key="loyers_rq")
         lancer = st.button("▶  Générer Avis & Quittances", use_container_width=True)
+
+# ── SIDEBAR GFS ──
+if st.session_state.robot == "GFS":
+    st.markdown("<span style='font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#5b7fa6'>📂 Fichier</span>", unsafe_allow_html=True)
+    recap_file = st.file_uploader("Récap soirées à facturer", type=["xlsx"], key="recap_gfs")
+    annee_gfs  = st.selectbox("Année à traiter", [2022,2023,2024,2025,2026], index=2, key="annee_gfs")
+    lancer = st.button("▶  Générer les Factures", use_container_width=True)
 
     st.markdown("<div style='padding-top:30px;text-align:center'><small style='color:#2d4a6a;font-size:10px'>Actifs : AC+GL · RA · RQ<br>À venir : RAA · VS · GFS · LF · LT</small></div>", unsafe_allow_html=True)
 
@@ -127,7 +138,7 @@ if st.session_state.robot == "AC_GL":
             st.download_button("⬇ Télécharger",data=buf3.getvalue(),file_name=f"ALERTES_{mois_sel.upper()}_{annee_sel}.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl3")
 
 # ══ ROBOT RA+RQ ══
-else:
+elif st.session_state.robot == "RA_RQ":
     st.markdown(f"<h1 style='font-family:Playfair Display,serif;font-size:32px;color:#0D1B2A'>📄 Avis d'Échéance & Quittances — {societe_sel} · {mois_sel} {int(annee_sel)}</h1><hr>", unsafe_allow_html=True)
     if not lancer:
         st.markdown("""<div style='text-align:center;padding:60px 20px;background:white;border-radius:20px;box-shadow:0 2px 12px rgba(0,0,0,.05);margin-top:20px'>
@@ -157,3 +168,55 @@ else:
         with dl2:
             st.markdown(f"<div class='dl-card'><div style='font-size:40px'>✅</div><div style='font-weight:600;color:#0D1B2A;margin:10px 0 4px;font-size:16px'>Quittances de Loyer</div><div style='font-size:12px;color:#9ca3af;margin-bottom:4px'>{stats['nb_quittances']} quittances — locataires ayant payé</div><div style='font-size:11px;color:#d1d5db;margin-bottom:14px'>{stats['nom_zip_quit']}</div></div>",unsafe_allow_html=True)
             st.download_button("⬇ Télécharger le ZIP",data=result_quit[0].getvalue(),file_name=stats['nom_zip_quit'],mime="application/zip",key="dl_quit",use_container_width=True)
+
+
+# ══ ROBOT GFS ══
+elif st.session_state.robot == "GFS":
+    st.markdown(f"<h1 style='font-family:Playfair Display,serif;font-size:32px;color:#0D1B2A'>🧾 Génération Factures Salle — {annee_gfs}</h1><hr>", unsafe_allow_html=True)
+    if not lancer:
+        st.markdown("""<div style='text-align:center;padding:60px 20px;background:white;border-radius:20px;box-shadow:0 2px 12px rgba(0,0,0,.05);margin-top:20px'>
+          <div style='font-size:56px'>🧾</div>
+          <h3 style='font-family:Playfair Display,serif;color:#0D1B2A'>Prêt à générer vos factures</h3>
+          <p style='color:#9ca3af;max-width:400px;margin:0 auto;font-size:14px'>Chargez le fichier récap soirées, sélectionnez l'année et cliquez sur <b>Générer les Factures</b>.</p>
+          <div style='margin-top:32px;display:flex;justify-content:center;gap:32px'>
+            <div style='text-align:center'><div style='font-size:28px'>📊</div><div style='font-size:12px;color:#9ca3af;margin-top:4px'>Récap soirées</div></div>
+            <div style='font-size:28px;color:#d1d5db;padding-top:8px'>→</div>
+            <div style='text-align:center'><div style='font-size:28px'>🧾</div><div style='font-size:12px;color:#9ca3af;margin-top:4px'>Factures PDF</div></div>
+            <div style='font-size:28px;color:#d1d5db;padding-top:8px'>→</div>
+            <div style='text-align:center'><div style='font-size:28px'>📦</div><div style='font-size:12px;color:#9ca3af;margin-top:4px'>ZIP facturier</div></div>
+          </div>
+        </div>""", unsafe_allow_html=True)
+    else:
+        if not recap_file:
+            st.error("⚠️ Veuillez charger le fichier récap soirées.")
+            st.stop()
+        from io import BytesIO as _BytesIO
+        recap_bytes = _BytesIO(recap_file.read())
+        recap_bytes.seek(0)
+        with st.spinner(f"🧾 Génération factures {annee_gfs}..."):
+            buf_zip, nom_zip, stats = run_gfs(recap_bytes, int(annee_gfs))
+        if isinstance(stats, str):
+            st.error(f"❌ {stats}")
+            st.stop()
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown(f'<div class="stat-card stat-total"><div class="stat-num" style="color:#3b82f6">{stats["nb"]}</div><div class="stat-lbl">Factures générées</div></div>', unsafe_allow_html=True)
+        with c2:
+            st.markdown(f'<div class="stat-card stat-ok"><div class="stat-num" style="color:#22c55e;font-size:18px">{stats["premiere"]}</div><div class="stat-lbl">Première facture</div></div>', unsafe_allow_html=True)
+        with c3:
+            st.markdown(f'<div class="stat-card stat-alert"><div class="stat-num" style="color:#f59e0b;font-size:18px">{stats["derniere"]}</div><div class="stat-lbl">Dernière facture</div></div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">📥 Télécharger le facturier</div>', unsafe_allow_html=True)
+        st.markdown(f"""<div class='dl-card'>
+          <div style='font-size:48px'>📦</div>
+          <div style='font-weight:600;color:#0D1B2A;margin:10px 0 4px;font-size:18px'>Facturier {annee_gfs}</div>
+          <div style='font-size:13px;color:#6b7280;margin-bottom:4px'>{stats['nb']} factures en ordre chronologique</div>
+          <div style='font-size:11px;color:#d1d5db;margin-bottom:16px'>{nom_zip}</div>
+        </div>""", unsafe_allow_html=True)
+        st.download_button(
+            "⬇ Télécharger le ZIP",
+            data=buf_zip.getvalue(),
+            file_name=nom_zip,
+            mime="application/zip",
+            key="dl_gfs",
+            use_container_width=True
+        )
