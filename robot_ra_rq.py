@@ -110,7 +110,8 @@ def lire_locataires(loyers_io, societe_key, mois, annee):
     i=0
     while i<len(df):
         row=df.iloc[i]
-        if _safe(row.iloc[0]).replace('.','').isdigit() and 'Locataire' in _safe(row.iloc[1]):
+        v0c = _safe(row.iloc[0]).replace('.','').replace('/','').replace(' ','').replace('-','')
+        if (v0c.isdigit() or v0c[:1].isdigit()) and 'Locataire' in _safe(row.iloc[1]):
             b={
                 'civilite':_safe(row.iloc[2]),'nom':_safe(row.iloc[3]),
                 'adresse_bien':adresse_immeuble.split(' - ')[0].strip() if ' - ' in adresse_immeuble else adresse_immeuble,
@@ -136,7 +137,8 @@ def lire_locataires(loyers_io, societe_key, mois, annee):
                 vm_n1 =rk.iloc[col_prec] if 0<=col_prec < len(rk) else None
 
                 # BREAK : nouveau locataire ou Quittance envoyée
-                if _safe(rk.iloc[0]).replace('.','').isdigit() and 'Locataire' in cleft:
+                v0b = _safe(rk.iloc[0]).replace('.','').replace('/','').replace(' ','').replace('-','')
+                if (v0b.isdigit() or v0b[:1].isdigit()) and 'Locataire' in cleft:
                     break
                 if 'Quittance' in label5:
                     break
@@ -173,8 +175,9 @@ def lire_locataires(loyers_io, societe_key, mois, annee):
                             if mode_r in('-','','nan'): mode_r='Virement'
                             b['reglements'].append((date_r,mode_r,v))
                     elif 'SOLDE LOCATAIRE' in label:
-                        v5=_num(rk.iloc[5]) if len(rk)>5 else 0
-                        if v5!=0: b['net_a_payer']=v5
+                        # Lire directement col S (index 18) — ne pas calculer
+                        v18=_num(rk.iloc[18]) if len(rk)>18 else 0
+                        b['net_a_payer']=v18
 
                 elif phase=='infos' and label and 'TOTAL DU' not in label.upper() and 'SOLDE' not in label.upper():
                     # Toutes les lignes col D avant TOTAL DU → si montant ≠ 0
@@ -213,7 +216,8 @@ def lire_locataires(loyers_io, societe_key, mois, annee):
                     rk2   = df.iloc[k2]
                     lab2  = _safe(rk2.iloc[3])
                     if 'Quittance' in _safe(rk2.iloc[4] if len(rk2)>4 else ''): break
-                    if _safe(rk2.iloc[0]).replace('.','').isdigit() and 'Locataire' in _safe(rk2.iloc[1]): break
+                    v0t = _safe(rk2.iloc[0]).replace('.','').replace('/','').replace(' ','').replace('-','')
+                    if (v0t.isdigit() or v0t[:1].isdigit()) and 'Locataire' in _safe(rk2.iloc[1]): break
                     if 'Solde pr' in lab2:
                         try:
                             v = float(rk2.iloc[tm['solde_col']])
@@ -332,9 +336,15 @@ def generer_avis(bloc,cfg,mois,annee):
             c.setFillColor(LIGHT); c.rect(20*mm,(y-4)*mm,170*mm,6.5*mm,fill=1,stroke=0)
         c.setFillColor(BLACK); c.setFont("Helvetica",9)
         c.drawString(22*mm,y*mm,lbl)
-        c.drawRightString(188*mm,y*mm,_fmt(mt))
+        # Montant négatif → afficher en rouge avec signe -
+        if mt < 0:
+            c.setFillColor(colors.HexColor('#cc0000'))
+            c.drawRightString(188*mm,y*mm,"- " + _fmt(mt))
+            c.setFillColor(BLACK)
+        else:
+            c.drawRightString(188*mm,y*mm,_fmt(mt))
         y-=7
-    total_avis=sum(abs(mt) for _,mt in lignes)
+    total_avis=sum(mt for _,mt in lignes)  # négatifs déduits du total
     c.setFillColor(LIGHT); c.rect(20*mm,(y-4)*mm,170*mm,6.5*mm,fill=1,stroke=0)
     c.setFillColor(NAVY); c.setFont("Helvetica-Bold",9)
     c.drawString(22*mm,y*mm,"TOTAL DE L'AVIS")
@@ -470,7 +480,7 @@ def generer_quittance(bloc,cfg,mois,annee):
     if bloc['loyer_hab']!=0:    lignes.append(("Loyer d'habitation",bloc['loyer_hab']))
     if bloc['prov_charges']!=0: lignes.append(("Provision pour charges",bloc['prov_charges']))
     for lbl,v in bloc['charges_supp']:
-        if v!=0: lignes.append((lbl,abs(v)))
+        if v!=0: lignes.append((lbl,v))
     y=165
     for i,(lbl,mt) in enumerate(lignes):
         if i%2==0:
