@@ -97,7 +97,10 @@ def lire_locataires(loyers_io, societe_key, mois, annee):
                 sheet=s; break
     if not sheet: return [],f"Onglet introuvable pour {societe_key}"
     df=pd.read_excel(loyers_io,sheet_name=sheet,header=None)
-    col_m=MOIS_COL[mois]-1
+    # Pour trimestriel : lire le 1er mois du trimestre
+    _COL_TRIM = {6: MOIS_COL[4]-1, 9: MOIS_COL[7]-1, 12: MOIS_COL[10]-1}
+    is_trim = cfg.get('trimestriel', False) and mois in _COL_TRIM
+    col_m = _COL_TRIM[mois] if is_trim else MOIS_COL[mois]-1
     adresse_immeuble=''
     for i in range(min(10,len(df))):
         v=_safe(df.iloc[i,0])
@@ -173,12 +176,18 @@ def lire_locataires(loyers_io, societe_key, mois, annee):
                         v5=_num(rk.iloc[5]) if len(rk)>5 else 0
                         if v5!=0: b['net_a_payer']=v5
 
-                elif label in('Régul. Charges 2024','Régul. Charges 2023','Taxe Foncière',
-                               'Frais/Imp PRLVT','Réajust. Chg 01-06',
-                               'Regul. Charges 2024','Regul. Charges 2023',
-                               'Taxe Fonciere','Reajust. Chg 01-06') and phase=='infos':
+                elif phase=='infos' and label and 'TOTAL DU' not in label.upper() and 'SOLDE' not in label.upper():
+                    # Toutes les lignes col D avant TOTAL DU → si montant ≠ 0
                     v=_num(vm)
-                    if v!=0: b['charges_supp'].append((label,v))
+                    if v!=0:
+                        if label in ('Loyer Habitation','Loyer d\'habitation'):
+                            b['loyer_hab']=v
+                        elif label in ('Prov. Charges','Provision Charges'):
+                            b['prov_charges']=v
+                        else:
+                            # Éviter doublons
+                            if not any(l==label for l,_ in b['charges_supp']):
+                                b['charges_supp'].append((label,v))
 
                 # INFO GAUCHE — indépendamment du label droite
                 if cleft=='Adresse':
@@ -244,39 +253,43 @@ def generer_avis(bloc,cfg,mois,annee):
             c.drawString(20*mm,y_s*mm,part.strip()); y_s-=5
     c.drawString(20*mm,y_s*mm,f"Tél : {cfg['tel']}"); y_s-=5
     c.drawString(20*mm,y_s*mm,f"Port. : {cfg['portable']}")
-    _gold(c,y_s-5)
-    # Locataire
+    y_gold = y_s - 5
+    _gold(c, y_gold)
+    # Locataire (ancré en haut, indépendant de la hauteur société)
     c.setFont("Helvetica",9); c.drawString(110*mm,258*mm,bloc['civilite'])
     c.setFont("Helvetica-Bold",9); c.drawString(110*mm,253*mm,bloc['nom'])
     c.setFont("Helvetica",9)
     c.drawString(110*mm,248*mm,bloc['adresse_loc'])
     c.drawString(110*mm,243*mm,bloc['cp_ville_loc'])
 
-    # Bien
+    # Bien — positionné dynamiquement sous le trait doré
+    y_bien = y_gold - 8
     c.setFont("Helvetica-Bold",9); c.setFillColor(NAVY)
-    c.drawString(20*mm,234*mm,"Identification du bien :")
+    c.drawString(20*mm, y_bien*mm, "Identification du bien\xa0:")
     c.setFont("Helvetica",9); c.setFillColor(BLACK)
-    c.drawString(20*mm,229*mm,bloc['appartement'])    # C34 : T3 - Lots N°XX
-    c.drawString(20*mm,224*mm,bloc['local'])           # C33 : RDC RUE 2E PORTE D
-    c.drawString(20*mm,219*mm,bloc['adresse_loc'])     # C32 : 72, RUE MIRABEAU
-    c.drawString(20*mm,214*mm,bloc['cp_ville_loc'])    # D32 : 94200 IVRY SUR SEINE
-
-
+    y_bien -= 5; c.drawString(20*mm, y_bien*mm, bloc['appartement'])
+    y_bien -= 5; c.drawString(20*mm, y_bien*mm, bloc['local'])
+    y_bien -= 5; c.drawString(20*mm, y_bien*mm, bloc['adresse_loc'])
+    y_bien -= 5; c.drawString(20*mm, y_bien*mm, bloc['cp_ville_loc'])
+    y_bien -= 8
     c.setFont("Helvetica-Oblique",8.5)
-    c.drawString(20*mm,210*mm,"Veuillez trouver ci-joint, votre avis d'échéance")
+    c.drawString(20*mm, y_bien*mm, "Veuillez trouver ci-joint, votre avis d'échéance")
+    y_bien -= 5
     msg_reglt = "Merci de nous adresser votre règlement le 1er du trimestre" if cfg.get("trimestriel") else "Merci de nous adresser votre règlement le 1er du mois"
-    c.drawString(20*mm,205*mm,msg_reglt)
-    c.setFont("Helvetica-Bold",8.5); c.drawString(20*mm,200*mm,"La comptabilité")
-    # Tableau designation
-    _band(c,192); c.setFillColor(WHITE); c.setFont("Helvetica-Bold",9)
-    c.drawString(22*mm,194.5*mm,"DÉSIGNATION"); c.drawRightString(188*mm,194.5*mm,"MONTANT")
+    c.drawString(20*mm, y_bien*mm, msg_reglt)
+    y_bien -= 5
+    c.setFont("Helvetica-Bold",8.5); c.drawString(20*mm, y_bien*mm, "La comptabilité")
+    y_bien -= 8
+    # Tableau designation — positionné dynamiquement
+    _band(c, y_bien); c.setFillColor(WHITE); c.setFont("Helvetica-Bold",9)
+    c.drawString(22*mm,(y_bien+1.5)*mm,"DÉSIGNATION"); c.drawRightString(188*mm,(y_bien+1.5)*mm,"MONTANT")
     c.setFillColor(BLACK)
     lignes=[]
     if bloc['loyer_hab']!=0:    lignes.append(("Loyer Habitation",bloc['loyer_hab']))
     if bloc['prov_charges']!=0: lignes.append(("Prov. Charges",bloc['prov_charges']))
     for lbl,v in bloc['charges_supp']:
         if v!=0: lignes.append((lbl,v))
-    y=187
+    y = y_bien - 5
     for i,(lbl,mt) in enumerate(lignes):
         if i%2==0:
             c.setFillColor(LIGHT); c.rect(20*mm,(y-4)*mm,170*mm,6.5*mm,fill=1,stroke=0)
