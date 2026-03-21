@@ -180,27 +180,27 @@ def lire_locataires(loyers_io, societe_key, mois, annee):
                         b['net_a_payer']=v18
 
                 elif phase=='infos' and label and 'TOTAL DU' not in label.upper() and 'SOLDE' not in label.upper():
-                    # Toutes les lignes col D avant TOTAL DU → si montant ≠ 0
+                    # Toutes les lignes col D dans l'ordre naturel du tableau
                     v=_num(vm)
                     if v!=0:
-                        if label in ('Loyer Habitation','Loyer d\'habitation'):
+                        # Éviter doublons — tout dans charges_supp pour respecter l'ordre Excel
+                        if not any(l==label for l,_ in b['charges_supp']):
+                            b['charges_supp'].append((label,v))
+                        # Mettre à jour loyer_hab et prov_charges pour compatibilité quittance
+                        if label in ('Loyer Habitation',"Loyer d'habitation"):
                             b['loyer_hab']=v
-                        elif label in ('Prov. Charges','Provision Charges'):
+                        elif label in ('Prov. Charges','Provision Charges','Prov. pour charges'):
                             b['prov_charges']=v
-                        else:
-                            # Éviter doublons
-                            if not any(l==label for l,_ in b['charges_supp']):
-                                b['charges_supp'].append((label,v))
 
-                # INFO GAUCHE — indépendamment du label droite
+                # INFO GAUCHE — uniquement infos fixes, PAS les montants
                 if cleft=='Adresse':
                     b['adresse_loc']=cvall; b['cp_ville_loc']=cvall2
                 elif cleft=='Local' and not b['local']:
                     b['local']=cvall
                 elif cleft=='Appartement' and not b['appartement']:
-                    b['appartement']=cvall; b['loyer_hab']=_num(vm)
+                    b['appartement']=cvall
                 elif cleft=='Superficie' and not b['superficie']:
-                    b['superficie']=cvall; b['prov_charges']=_num(vm)
+                    b['superficie']=cvall
 
             # ── MOUVEMENTS TRIMESTRIELS ──────────────────────────
             if is_trim:
@@ -325,11 +325,12 @@ def generer_avis(bloc,cfg,mois,annee):
     _band(c, y_bien); c.setFillColor(WHITE); c.setFont("Helvetica-Bold",9)
     c.drawString(22*mm,(y_bien+1.5)*mm,"DÉSIGNATION"); c.drawRightString(188*mm,(y_bien+1.5)*mm,"MONTANT")
     c.setFillColor(BLACK)
-    lignes=[]
-    if bloc['loyer_hab']!=0:    lignes.append(("Loyer Habitation",bloc['loyer_hab']))
-    if bloc['prov_charges']!=0: lignes.append(("Prov. Charges",bloc['prov_charges']))
-    for lbl,v in bloc['charges_supp']:
-        if v!=0: lignes.append((lbl,v))
+    # Ordre naturel Excel : tout dans charges_supp
+    lignes=[(lbl,v) for lbl,v in bloc['charges_supp'] if v!=0]
+    # Fallback mensuel si charges_supp vide
+    if not lignes:
+        if bloc['loyer_hab']!=0:    lignes.append(("Loyer Habitation",bloc['loyer_hab']))
+        if bloc['prov_charges']!=0: lignes.append(("Prov. Charges",bloc['prov_charges']))
     y = y_bien - 5
     for i,(lbl,mt) in enumerate(lignes):
         if i%2==0:
