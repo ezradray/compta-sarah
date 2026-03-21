@@ -118,7 +118,7 @@ def lire_locataires(loyers_io, societe_key, mois, annee):
                 'adresse_loc':'','cp_ville_loc':'',
                 'local':'','appartement':'','superficie':'',
                 'loyer_hab':0,'prov_charges':0,'charges_supp':[],
-                'solde_prec':0,'date_solde':'','caf':[],'reglements':[],
+                'solde_prec':0,'date_solde':'','caf':[],'reglements':[],'reglements_trim':[],'solde_prec_trim':0,'date_solde_trim':'',
                 'net_a_payer':None,'a_paye':False,
             }
             if not b['nom']: i+=1; continue
@@ -198,6 +198,43 @@ def lire_locataires(loyers_io, societe_key, mois, annee):
                     b['appartement']=cvall; b['loyer_hab']=_num(vm)
                 elif cleft=='Superficie' and not b['superficie']:
                     b['superficie']=cvall; b['prov_charges']=_num(vm)
+
+            # ── MOUVEMENTS TRIMESTRIELS ──────────────────────────
+            if is_trim:
+                _TRIM_MVTS = {
+                    6:  {'solde_col': 6,  'reglt_cols': [6,7,8],   'date_avis': f'01/04/{annee}', 'date_solde': f'01/01/{annee}'},
+                    9:  {'solde_col': 9,  'reglt_cols': [9,10,11],  'date_avis': f'01/07/{annee}', 'date_solde': f'01/04/{annee}'},
+                    12: {'solde_col': 12, 'reglt_cols': [12,13,14], 'date_avis': f'01/10/{annee}', 'date_solde': f'01/07/{annee}'},
+                }
+                tm = _TRIM_MVTS[mois]
+                b['date_avis_trim'] = tm['date_avis']
+                # Chercher solde précédent et règlements dans le bloc
+                for k2 in range(i+1, min(i+50, len(df))):
+                    rk2   = df.iloc[k2]
+                    lab2  = _safe(rk2.iloc[3])
+                    if 'Quittance' in _safe(rk2.iloc[4] if len(rk2)>4 else ''): break
+                    if _safe(rk2.iloc[0]).replace('.','').isdigit() and 'Locataire' in _safe(rk2.iloc[1]): break
+                    if 'Solde pr' in lab2:
+                        try:
+                            v = float(rk2.iloc[tm['solde_col']])
+                            if v != 0:
+                                b['solde_prec_trim'] = v
+                                b['date_solde_trim'] = tm['date_solde']
+                        except: pass
+                    elif 'glement locataire' in lab2:
+                        dates_row = df.iloc[k2+1] if k2+1 < len(df) else None
+                        modes_row = df.iloc[k2+2] if k2+2 < len(df) else None
+                        for col in tm['reglt_cols']:
+                            try:
+                                mt = float(rk2.iloc[col])
+                                if mt != 0 and str(mt) != 'nan':
+                                    try: dt = pd.to_datetime(dates_row.iloc[col]).strftime('%d/%m/%Y')
+                                    except: dt = ''
+                                    md = _safe(modes_row.iloc[col]) if modes_row is not None else 'Virement'
+                                    if md in ('-','','nan'): md = 'Virement'
+                                    b['reglements_trim'].append((dt, f"Règlement — {md}", mt))
+                            except: pass
+                        break
 
             if b['net_a_payer'] is None:
                 total=b['loyer_hab']+b['prov_charges']+sum(v for _,v in b['charges_supp'])
@@ -311,18 +348,35 @@ def generer_avis(bloc,cfg,mois,annee):
     c.drawString(163*mm,(y+1.5)*mm,"CRÉDIT")
     c.setFillColor(BLACK)
     mouvs=[]
-    if bloc['solde_prec']!=0:
-        dt_sp=bloc.get('date_solde',f"01/{mois:02d}/{annee}")
-        if bloc['solde_prec']>0: mouvs.append((dt_sp,"Solde précédent",bloc['solde_prec'],None))
-        else: mouvs.append((dt_sp,"Solde précédent",None,bloc['solde_prec']))
-    for dt,v in bloc['caf']:
-        if v>0: mouvs.append((dt,"Virement CAF",v,None))
-        else:   mouvs.append((dt,"Virement CAF",None,v))
-    for dt,mode,v in bloc['reglements']:
-        lib=f"Règlement locataire {mode}".strip()
-        if v>0: mouvs.append((dt,lib,v,None))
-        else:   mouvs.append((dt,lib,None,v))
-    mouvs.append((f"01/{mois:02d}/{annee}","Total de l'avis ci-dessus",total_avis,None))
+    if is_trim:
+        # ── MODE TRIMESTRIEL ─────────────────────────────────
+        # Solde précédent = col 1er mois trimestre N-1
+        sp = bloc.get('solde_prec_trim', 0)
+        if sp != 0:
+            dt_sp = bloc.get('date_solde_trim', '')
+            if sp > 0: mouvs.append((dt_sp, "Solde précédent", sp, None))
+            else:      mouvs.append((dt_sp, "Solde précédent", None, sp))
+        # Règlements des 3 mois du trimestre précédent
+        for dt, lib, mt in bloc.get('reglements_trim', []):
+            if mt < 0: mouvs.append((dt, lib, None, mt))
+            else:      mouvs.append((dt, lib, mt, None))
+        # Total avis → 1er mois du trimestre EN COURS
+        date_avis = bloc.get('date_avis_trim', f'01/{mois:02d}/{annee}')
+        mouvs.append((date_avis, "Total de l'avis ci-dessus", total_avis, None))
+    else:
+        # ── MODE MENSUEL ─────────────────────────────────────
+        if bloc['solde_prec']!=0:
+            dt_sp=bloc.get('date_solde',f"01/{mois:02d}/{annee}")
+            if bloc['solde_prec']>0: mouvs.append((dt_sp,"Solde précédent",bloc['solde_prec'],None))
+            else: mouvs.append((dt_sp,"Solde précédent",None,bloc['solde_prec']))
+        for dt,v in bloc['caf']:
+            if v>0: mouvs.append((dt,"Virement CAF",v,None))
+            else:   mouvs.append((dt,"Virement CAF",None,v))
+        for dt,mode,v in bloc['reglements']:
+            lib=f"Règlement locataire {mode}".strip()
+            if v>0: mouvs.append((dt,lib,v,None))
+            else:   mouvs.append((dt,lib,None,v))
+        mouvs.append((f"01/{mois:02d}/{annee}","Total de l'avis ci-dessus",total_avis,None))
     ym=y-7
     tot_deb =sum(m[2] for m in mouvs if m[2] is not None)
     tot_cred=sum(abs(m[3]) for m in mouvs if m[3] is not None)
