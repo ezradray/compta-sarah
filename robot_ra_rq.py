@@ -41,19 +41,19 @@ SOCIETES = {
     "SCI AZM": {
         "nom":"SCI AZM","adresse":"6, RUE DE VALMY - 93100 MONTREUIL",
         "tel":"01.48.70.41.26","portable":"06.22.30.58.84","ville":"MONTREUIL",
-        "sheet_kw":["AZM"],"sheet_exc":[],"avis":True,
+        "sheet_kw":["AZM"],"sheet_exc":[],"avis":True,"trimestriel":True,
     },
     "SCI MAZ": {
         "nom":"SCI MAZ","adresse":"6, RUE DE VALMY - 93100 MONTREUIL",
         "tel":"01.48.70.41.26","portable":"06.22.30.58.84","ville":"MONTREUIL",
-        "sheet_kw":["MAZ"],"sheet_exc":[],"avis":True,
+        "sheet_kw":["MAZ"],"sheet_exc":[],"avis":True,"trimestriel":True,
     },
     "SOGEPA": {
         "nom":"SOGEPA","adresse":"SAS au capital de 15.000 euros",
         "adresse2":"RCS BOBIGNY B 439 263 591",
         "adresse3":"29, RUE DU PROGRES - 93107 MONTREUIL CEDEX",
         "tel":"01.48.70.41.26","portable":"06.22.30.58.84","ville":"MONTREUIL",
-        "sheet_kw":["SOGEPA"],"sheet_exc":[],"avis":True,
+        "sheet_kw":["SOGEPA"],"sheet_exc":[],"avis":True,"trimestriel":True,
     },
     "M.A LA GARENNE": {
         "nom":"M.A LA GARENNE","adresse":"","tel":"","portable":"","ville":"",
@@ -214,13 +214,21 @@ def generer_avis(bloc,cfg,mois,annee):
     fin=_fin_mois(mois,annee)
     today=date.today().strftime("%d/%m/%Y")
     debut_s=f"01/{mois:02d}/{annee}"; fin_s=f"{fin:02d}/{mois:02d}/{annee}"
+    # Période trimestrielle
+    _TRIM = {6:("2ème Trimestre","Avril","Juin"), 9:("3ème Trimestre","Juillet","Septembre"), 12:("4ème Trimestre","Octobre","Décembre")}
+    is_trim = cfg.get('trimestriel', False) and mois in _TRIM
+    if is_trim:
+        t_label, t_debut, t_fin = _TRIM[mois]
+        periode_str = f"{t_label} {annee}  —  {t_debut} à {t_fin} {annee}"
+    else:
+        periode_str = f"Période du {debut_s}  Au  {fin_s}"
     buf=BytesIO()
     c=rl_canvas.Canvas(buf,pagesize=A4)
     _band(c,268,hh=18)
     c.setFillColor(WHITE); c.setFont("Helvetica-Bold",14)
     c.drawCentredString(w/2,279*mm,"AVIS D'ÉCHÉANCE")
     c.setFont("Helvetica",9)
-    c.drawCentredString(w/2,273*mm,f"Période du {debut_s}  Au  {fin_s}")
+    c.drawCentredString(w/2,273*mm,periode_str)
     c.setFillColor(BLACK)
     c.setFont("Helvetica",9)
     c.drawRightString(188*mm,264*mm,f"{cfg['ville']}, le {today}")
@@ -256,7 +264,8 @@ def generer_avis(bloc,cfg,mois,annee):
 
     c.setFont("Helvetica-Oblique",8.5)
     c.drawString(20*mm,210*mm,"Veuillez trouver ci-joint, votre avis d'échéance")
-    c.drawString(20*mm,205*mm,"Merci de nous adresser votre règlement le 1er du mois")
+    msg_reglt = "Merci de nous adresser votre règlement le 1er du trimestre" if cfg.get("trimestriel") else "Merci de nous adresser votre règlement le 1er du mois"
+    c.drawString(20*mm,205*mm,msg_reglt)
     c.setFont("Helvetica-Bold",8.5); c.drawString(20*mm,200*mm,"La comptabilité")
     # Tableau designation
     _band(c,192); c.setFillColor(WHITE); c.setFont("Helvetica-Bold",9)
