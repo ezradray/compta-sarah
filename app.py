@@ -60,10 +60,25 @@ with st.sidebar:
     st.markdown("<span style='font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#5b7fa6'>🏢 Société</span>", unsafe_allow_html=True)
     societe_sel = st.selectbox("Société", SOCIETES, key="societe")
     st.markdown("<span style='font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#5b7fa6'>📅 Période</span>", unsafe_allow_html=True)
-    mois_options = list(MOIS_NOMS.values())
-    mois_sel  = st.selectbox("Mois", mois_options, index=2)
-    mois_num  = list(MOIS_NOMS.keys())[list(MOIS_NOMS.values()).index(mois_sel)]
     annee_sel = st.number_input("Année", min_value=2020, max_value=2035, value=2026, step=1)
+
+    # Sociétés trimestrielles
+    SOCIETES_TRIM = ["SCI AZM", "SCI MAZ", "SOGEPA"]
+    if st.session_state.robot == "RA_RQ" and societe_sel in SOCIETES_TRIM:
+        trim_opts = {
+            "T1 — Janvier à Mars": 3,
+            "T2 — Avril à Juin": 6,
+            "T3 — Juillet à Septembre": 9,
+            "T4 — Octobre à Décembre": 12,
+        }
+        trim_sel = st.selectbox("Trimestre", list(trim_opts.keys()), index=1, key="trim_sel")
+        mois_num = trim_opts[trim_sel]
+        mois_sel = trim_sel
+    else:
+        mois_options = list(MOIS_NOMS.values())
+        mois_sel  = st.selectbox("Mois", mois_options, index=2)
+        mois_num  = list(MOIS_NOMS.keys())[list(MOIS_NOMS.values()).index(mois_sel)]
+
     st.markdown("---")
 
     if st.session_state.robot == "AC_GL":
@@ -72,7 +87,7 @@ with st.sidebar:
         pivot_file  = st.file_uploader("Tableau Pivot",   type=["xlsx"], key="pivot")
         loyers_file = st.file_uploader("Tableau Loyers",  type=["xlsx"], key="loyers")
         lancer = st.button("▶  Lancer AC+GL", use_container_width=True)
-    else:
+    elif st.session_state.robot == "RA_RQ":
         st.markdown("<span style='font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#5b7fa6'>📂 Fichier</span>", unsafe_allow_html=True)
         loyers_file_rq = st.file_uploader("Tableau Loyers", type=["xlsx"], key="loyers_rq")
         lancer = st.button("▶  Générer Avis & Quittances", use_container_width=True)
