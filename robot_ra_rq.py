@@ -478,10 +478,12 @@ def generer_quittance(bloc,cfg,mois,annee):
     c.drawRightString(188*mm,173.5*mm,"Montants")
     c.setFillColor(BLACK)
     lignes=[]
-    if bloc['loyer_hab']!=0:    lignes.append(("Loyer d'habitation",bloc['loyer_hab']))
-    if bloc['prov_charges']!=0: lignes.append(("Provision pour charges",bloc['prov_charges']))
-    for lbl,v in bloc['charges_supp']:
-        if v!=0: lignes.append((lbl,v))
+    # Ordre naturel Excel : tout dans charges_supp, comme l'avis
+    lignes=[(lbl,abs(v)) for lbl,v in bloc['charges_supp'] if v!=0]
+    # Fallback si charges_supp vide
+    if not lignes:
+        if bloc['loyer_hab']!=0:    lignes.append(("Loyer d'habitation",bloc['loyer_hab']))
+        if bloc['prov_charges']!=0: lignes.append(("Provision pour charges",bloc['prov_charges']))
     y=165
     for i,(lbl,mt) in enumerate(lignes):
         if i%2==0:
