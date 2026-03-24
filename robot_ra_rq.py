@@ -144,11 +144,8 @@ def lire_locataires(loyers_io, societe_key, mois, annee):
                     break
 
                 # LABEL DROITE — traité EN PRIORITÉ (peut coexister avec info gauche)
-                # Détecter "Solde initial" en col B pour faire avancer la phase
-                if 'Solde initial' in label or 'Solde initial' in cleft:
-                    if phase=='infos': phase='solde1'
-
-                if 'Solde pr' in label and 'initial' not in label.lower():
+                if 'Solde initial' in label and phase=='infos': phase='solde1'  # ← SEULE MODIF
+                if 'Solde pr' in label:
                     if phase=='infos':
                         phase='solde1'          # 1ère occurrence = solde initial → skip
                     elif phase=='solde1':
