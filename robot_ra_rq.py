@@ -144,8 +144,23 @@ def lire_locataires(loyers_io, societe_key, mois, annee):
                     break
 
                 # LABEL DROITE — traité EN PRIORITÉ (peut coexister avec info gauche)
-                if 'Solde initial' in label and phase=='infos': phase='solde1'  # ← SEULE MODIF
-                if 'Solde pr' in label:
+                # Charges : lues si on n'a pas encore vu "Solde précédent"
+                if label and 'TOTAL DU' not in label.upper() \
+                   and 'SOLDE' not in label.upper() and 'Règlement' not in label \
+                   and 'Date de' not in label and 'Mode de' not in label \
+                   and 'CAF' not in label and 'Solde initial' not in label \
+                   and phase in ('infos', 'solde1'):
+                    v=_num(vm)
+                    if v!=0:
+                        if not any(l==label for l,_ in b['charges_supp']):
+                            b['charges_supp'].append((label,v))
+                        if label in ('Loyer Habitation',"Loyer d'habitation"):
+                            b['loyer_hab']=v
+                        elif label in ('Prov. Charges','Provision Charges','Prov. pour charges'):
+                            b['prov_charges']=v
+
+                if 'Solde initial' in label and phase=='infos': phase='solde1'
+                if 'Solde pr' in label and 'initial' not in label.lower():
                     if phase=='infos':
                         phase='solde1'          # 1ère occurrence = solde initial → skip
                     elif phase=='solde1':
@@ -179,19 +194,6 @@ def lire_locataires(loyers_io, societe_key, mois, annee):
                         # Lire directement col S (index 18) — ne pas calculer
                         v18=_num(rk.iloc[18]) if len(rk)>18 else 0
                         b['net_a_payer']=v18
-
-                elif phase=='infos' and label and 'TOTAL DU' not in label.upper() and 'SOLDE' not in label.upper():
-                    # Toutes les lignes col D dans l'ordre naturel du tableau
-                    v=_num(vm)
-                    if v!=0:
-                        # Éviter doublons — tout dans charges_supp pour respecter l'ordre Excel
-                        if not any(l==label for l,_ in b['charges_supp']):
-                            b['charges_supp'].append((label,v))
-                        # Mettre à jour loyer_hab et prov_charges pour compatibilité quittance
-                        if label in ('Loyer Habitation',"Loyer d'habitation"):
-                            b['loyer_hab']=v
-                        elif label in ('Prov. Charges','Provision Charges','Prov. pour charges'):
-                            b['prov_charges']=v
 
                 # INFO GAUCHE — uniquement infos fixes, PAS les montants
                 if cleft=='Adresse':
