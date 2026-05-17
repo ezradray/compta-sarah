@@ -3,6 +3,7 @@ import pandas as pd
 from robot_ac_gl import run, MOIS_NOMS
 from robot_ra_rq import run_ra_rq
 from robot_gfs import run_gfs
+from robot_sogepa_cb import run_sogepa_cb
 
 st.set_page_config(page_title="Compta Sarah", page_icon="💼", layout="wide", initial_sidebar_state="expanded")
 
@@ -35,7 +36,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-SOCIETES = ["SCI EMJJ","SCI MMA","SCI AZM","SCI MAZ","SOGEPA","DSM","M.A LA GARENNE"]
+SOCIETES = ["SCI EMJJ","SCI MMA","SCI AZM","SCI MAZ","SOGEPA","SOGEPA CB","DSM","M.A LA GARENNE"]
 
 if "robot" not in st.session_state:
     st.session_state.robot = "AC_GL"
@@ -92,6 +93,13 @@ with st.sidebar:
         loyers_file_rq = st.file_uploader("Tableau Loyers", type=["xlsx"], key="loyers_rq")
         lancer = st.button("▶  Générer Avis & Quittances", use_container_width=True)
 
+# ── SIDEBAR SOGEPA CB ──
+if st.session_state.robot == "AC_GL" and societe_sel == "SOGEPA CB":
+    st.markdown("<span style='font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#5b7fa6'>📂 Fichiers</span>", unsafe_allow_html=True)
+    pdf_cb_file  = st.file_uploader("Relevé CB (PDF)", type=["pdf"], key="pdf_cb")
+    pivot_cb_file= st.file_uploader("Tableau Pivot",   type=["xlsx"], key="pivot_cb")
+    lancer = st.button("▶  Traiter Relevé CB", use_container_width=True)
+
 # ── SIDEBAR GFS ──
 if st.session_state.robot == "GFS":
     st.markdown("<span style='font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#5b7fa6'>📂 Fichier</span>", unsafe_allow_html=True)
@@ -111,6 +119,27 @@ if st.session_state.robot == "AC_GL":
           <p style='color:#9ca3af;max-width:400px;margin:0 auto;font-size:14px'>Chargez vos 3 fichiers, sélectionnez le mois et cliquez sur <b>Lancer AC+GL</b>.</p>
         </div>""", unsafe_allow_html=True)
     else:
+        # ── CAS SOGEPA CB ────────────────────────────────────
+        if societe_sel == "SOGEPA CB":
+            if not pdf_cb_file or not pivot_cb_file:
+                st.error("⚠️ Veuillez charger le PDF et le tableau pivot."); st.stop()
+            from io import BytesIO as _BytesIO
+            pdf_bytes   = _BytesIO(pdf_cb_file.read()); pdf_bytes.seek(0)
+            pivot_bytes = _BytesIO(pivot_cb_file.read()); pivot_bytes.seek(0)
+            with st.spinner(f"📄 Traitement CB SOGEPA — {mois_sel} {int(annee_sel)}..."):
+                buf_cb, stats_cb = run_sogepa_cb(pdf_bytes, pivot_bytes, mois=mois_num, annee=int(annee_sel))
+            if isinstance(stats_cb, str):
+                st.error(f"❌ {stats_cb}"); st.stop()
+            c1,c2,c3 = st.columns(3)
+            with c1: st.markdown(f'''<div class="stat-card stat-total"><div class="stat-num" style="color:#3b82f6">{stats_cb["nb_lignes"]}</div><div class="stat-lbl">Lignes traitées</div></div>''',unsafe_allow_html=True)
+            with c2: st.markdown(f'''<div class="stat-card stat-ok"><div class="stat-num" style="color:#22c55e">{stats_cb["nb_cartes"]}</div><div class="stat-lbl">Cartes</div></div>''',unsafe_allow_html=True)
+            with c3: st.markdown(f'''<div class="stat-card stat-alert"><div class="stat-num" style="color:#f59e0b;font-size:18px">{stats_cb["total_debit"]:,.2f} €</div><div class="stat-lbl">Total prélevé</div></div>''',unsafe_allow_html=True)
+            if stats_cb["alertes"]:
+                for a in stats_cb["alertes"]: st.warning(a)
+            st.markdown('<div class="section-title">📥 Télécharger</div>',unsafe_allow_html=True)
+            st.download_button("⬇ Télécharger l'Excel",data=buf_cb.getvalue(),file_name=stats_cb["nom_fichier"],mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_cb",use_container_width=True)
+            st.stop()
+        # ── CAS NORMAL ────────────────────────────────────────
         if not releve_file or not pivot_file or not loyers_file:
             st.error("⚠️ Veuillez charger les 3 fichiers avant de lancer le robot."); st.stop()
         with st.spinner(f"🤖 Traitement — {mois_sel} {annee_sel}..."):
