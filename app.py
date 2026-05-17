@@ -35,7 +35,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-SOCIETES = ["SCI EMJJ","SCI EMJJ MIRABEAU","SCI MMA","SCI AZM","SCI MAZ","SOGEPA","M.A LA GARENNE"]
+SOCIETES = ["SCI EMJJ","SCI MMA","SCI AZM","SCI MAZ","SOGEPA","DSM","M.A LA GARENNE"]
 
 if "robot" not in st.session_state:
     st.session_state.robot = "AC_GL"
@@ -114,7 +114,7 @@ if st.session_state.robot == "AC_GL":
         if not releve_file or not pivot_file or not loyers_file:
             st.error("⚠️ Veuillez charger les 3 fichiers avant de lancer le robot."); st.stop()
         with st.spinner(f"🤖 Traitement — {mois_sel} {annee_sel}..."):
-            df_res, buffers, maj, err = run(releve_file, pivot_file, loyers_file, mois=mois_num, annee=int(annee_sel))
+            df_res, buffers, maj, err = run(releve_file, pivot_file, loyers_file, mois=mois_num, annee=int(annee_sel), societe_key=societe_sel)
         if err: st.error(f"❌ {err}"); st.stop()
         buf1,buf2,buf3 = buffers
         nb_ok=len(df_res[df_res.STATUT=='OK']); nb_al=len(df_res[df_res.STATUT=='ALERTE']); nb_ig=len(df_res[df_res.STATUT=='IGNORE'])
