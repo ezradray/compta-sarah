@@ -40,6 +40,17 @@ NOUV = {
     'MT DESIGN':             ('401MTDES', 'MT DESIGN'),
 }
 
+
+SOCIETES_AC = {
+    "SCI EMJJ":       {"sheet_kw":["EMJJ"], "sheet_exc":["MIRA"]},
+    "SCI MMA":        {"sheet_kw":["MMA"],  "sheet_exc":[]},
+    "SCI AZM":        {"sheet_kw":["AZM"],  "sheet_exc":[]},
+    "SCI MAZ":        {"sheet_kw":["MAZ"],  "sheet_exc":[]},
+    "SOGEPA":         {"sheet_kw":["SOGEPA"],"sheet_exc":[]},
+    "DSM":            {"sheet_kw":["DSM"],  "sheet_exc":[]},
+    "M.A LA GARENNE": {"sheet_kw":["GARENNE"],"sheet_exc":[]},
+}
+
 def _kw(lib):
     for p,c,t,l in KW:
         if re.search(p, lib, re.IGNORECASE): return c,t,l
@@ -72,7 +83,7 @@ def _match(lib, loc_p, four_p, ass_p):
         if s>bs: bs,bn,bc,bt=s,r['LIBELLE'],r['COMPTE'],'ASSURANCE'
     return bc,bt,bn,bs
 
-def run(releve_io, pivot_io, loyers_io, mois, annee=2026, seuil=0.52):
+def run(releve_io, pivot_io, loyers_io, mois, annee=2026, seuil=0.52, societe_key='SCI EMJJ'):
     # Pivot
     df_p=pd.read_excel(pivot_io, header=None)
     df_p.columns=['COMPTE','LIBELLE','C','D']
@@ -162,7 +173,14 @@ def run(releve_io, pivot_io, loyers_io, mois, annee=2026, seuil=0.52):
     buf2=BytesIO()
     loyers_io.seek(0)
     wb=load_workbook(loyers_io)
-    sheet=next((s for s in wb.sheetnames if 'EMJJ' in s.upper() and 'MIRA' not in s.upper()), wb.sheetnames[0])
+    # Sélection dynamique de l'onglet selon la société
+    cfg_soc = SOCIETES_AC.get(societe_key, {"sheet_kw":[], "sheet_exc":[]})
+    sheet = wb.sheetnames[0]
+    for s in wb.sheetnames:
+        su = s.upper()
+        if all(k.upper() in su for k in cfg_soc['sheet_kw']):
+            if not any(e.upper() in su for e in cfg_soc['sheet_exc']):
+                sheet = s; break
     ws_l=wb[sheet]
     COL_M=MOIS_COL[mois]
     loyers_ok=df_res[(df_res.STATUT=='OK')&(df_res.TYPE=='LOYER')].copy()
